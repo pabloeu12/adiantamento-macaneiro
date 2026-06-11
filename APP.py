@@ -60,27 +60,23 @@ st.markdown("---")
 with st.expander("📖 Como extrair as planilhas do KMM (Passo a Passo)"):
     st.markdown("""
     ### 1. LISTA DE EVENTOS DE RECIBO DE PAGAMENTO
-    **Onde encontrar no KMM:**
-    * **Caminho:** `Folha de Pagamento` ➔ `Folha de Pagamento` ➔ `Lista de Recibos de Pagamento...`
-    
-    **Parâmetros para preencher:**
+    **Caminho:** `Folha de Pagamento` ➔ `Folha de Pagamento` ➔ `Lista de Recibos de Pagamento...`
     * **Competência Inicial:** Último adiantamento processado (mês anterior)
     * **Competência Final:** Adiantamento atual que está validando (mês atual)
     * **Tipo de Recibo:** `2 Adiantamento`
-    
-    **Ação Final:** Clicar em **"Filtrar"** e salvar o relatório.
+    * Clicar em **"Filtrar"** e salvar.
 
     ---
-
     ### 2. LISTA DE FUNCIONÁRIOS ATIVOS
-    **Onde encontrar no KMM:**
-    * **Caminho:** `Folha de Pagamento` ➔ `Funcionários` ➔ `Registro...`
-    * **Primeiro Passo:** Clicar em **"Listar..."**
-    
-    **Parâmetros para preencher:**
+    **Caminho:** `Folha de Pagamento` ➔ `Funcionários` ➔ `Registro...`
+    * Clicar em **"Listar..."**
     * **Situação:** `Ativos`
-    
-    **Ação Final:** Clicar em **"Filtrar"** e salvar o relatório.
+    * Clicar em **"Filtrar"** e salvar.
+
+    ---
+    ### 3. LISTA DE PERÍODOS AQUISITIVOS E CONCESSIVOS (FÉRIAS)
+    **Caminho:** `Folha de Pagamento` ➔ `Férias` ➔ `Lista de Períodos Aquisitivos e Concessivos...`
+    * Clicar em **"Filtrar"** e salvar.
     """)
 
 # -----------------------------------------------------------------------------
@@ -113,14 +109,38 @@ def verificar_optante(val):
     return True
 
 def tem_direito_adiantamento(mes, ano, data_adm):
-    if pd.isna(data_adm): 
-        return True
+    if pd.isna(data_adm): return True
     data_ref_inicio = pd.Timestamp(year=ano, month=mes, day=1)
-    if data_adm < data_ref_inicio:
-        return True
+    if data_adm < data_ref_inicio: return True
     if data_adm.year == ano and data_adm.month == mes:
         return data_adm.day <= 6
     return False
+
+def calcular_dias_ferias_no_mes(mes, ano, data_ini, data_fim):
+    """Calcula os dias de férias que caem estritamente dentro de um mês (Mês Comercial de 30 dias)"""
+    if pd.isna(data_ini) or pd.isna(data_fim): return 0
+    
+    primeiro_dia = pd.Timestamp(year=ano, month=mes, day=1)
+    ultimo_dia_real = pd.Timestamp(year=ano, month=mes, day=1) + pd.offsets.MonthEnd(0)
+    
+    if data_fim < primeiro_dia or data_ini > ultimo_dia_real:
+        return 0
+        
+    overlap_start = max(primeiro_dia, data_ini)
+    overlap_end = min(ultimo_dia_real, data_fim)
+    
+    d_start = overlap_start.day
+    if d_start == 31: d_start = 30
+    
+    d_end = overlap_end.day
+    if d_end == 31: d_end = 30
+    
+    # Se tirou férias o mês inteiro
+    if overlap_start == primeiro_dia and overlap_end == ultimo_dia_real:
+        return 30
+        
+    dias = d_end - d_start + 1
+    return max(0, dias)
 
 def formatar_moeda_br(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -144,20 +164,17 @@ def gerar_excel_formatado(df, mes_ant, mes_atu):
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             
         for row in range(2, worksheet.max_row + 1):
-            # Formata colunas de valor monetário (Agora deslocadas para 5, 6, 7, 8 devido à Admissão ser a coluna 3)
             for col_idx in [5, 6, 7, 8]:
                 cell = worksheet.cell(row=row, column=col_idx)
                 cell.number_format = 'R$ #,##0.00'
                 cell.alignment = Alignment(horizontal='right')
             
-            # Alinhamentos centrais das colunas de texto/código/datas
-            worksheet.cell(row=row, column=1).alignment = Alignment(horizontal='center') # Matrícula
-            worksheet.cell(row=row, column=3).alignment = Alignment(horizontal='center') # Data de Admissão
-            worksheet.cell(row=row, column=9).alignment = Alignment(horizontal='center') # Status
+            worksheet.cell(row=row, column=1).alignment = Alignment(horizontal='center')
+            worksheet.cell(row=row, column=3).alignment = Alignment(horizontal='center')
+            worksheet.cell(row=row, column=9).alignment = Alignment(horizontal='center')
             
-            # Colorir células de Status dinamicamente (Status agora é coluna 9)
-            status_val = worksheet.cell(row=row, column=9).value
-            if status_val == 'Certo':
+            status_val = str(worksheet.cell(row=row, column=9).value)
+            if 'Certo' in status_val:
                 worksheet.cell(row=row, column=9).fill = PatternFill(start_color='D4EDDA', end_color='D4EDDA', fill_type='solid')
             elif status_val == 'Errado':
                 worksheet.cell(row=row, column=9).fill = PatternFill(start_color='F8D7DA', end_color='F8D7DA', fill_type='solid')
@@ -179,27 +196,35 @@ def gerar_excel_formatado(df, mes_ant, mes_atu):
     return output.getvalue()
 
 @st.cache_data
-def processar_dados(file_eventos, file_ativos):
-    if file_eventos.name.endswith('.csv'):
-        df_ev_raw = pd.read_csv(file_eventos, header=None, sep=None, engine='python')
-    else:
-        df_ev_raw = pd.read_excel(file_eventos, header=None)
+def processar_dados(file_eventos, file_ativos, file_ferias):
+    # Leituras
+    if file_eventos.name.endswith('.csv'): df_ev_raw = pd.read_csv(file_eventos, header=None, sep=None, engine='python')
+    else: df_ev_raw = pd.read_excel(file_eventos, header=None)
         
-    if file_ativos.name.endswith('.csv'):
-        df_at_raw = pd.read_csv(file_ativos, header=None, sep=None, engine='python')
-    else:
-        df_at_raw = pd.read_excel(file_ativos, header=None)
+    if file_ativos.name.endswith('.csv'): df_at_raw = pd.read_csv(file_ativos, header=None, sep=None, engine='python')
+    else: df_at_raw = pd.read_excel(file_ativos, header=None)
+        
+    if file_ferias.name.endswith('.csv'): df_fe_raw = pd.read_csv(file_ferias, header=None, sep=None, engine='python')
+    else: df_fe_raw = pd.read_excel(file_ferias, header=None)
 
+    # Recortes Exatos (Linha 3 em diante)
     df_ev = df_ev_raw.iloc[2:, [1, 2, 11, 12, 13, 14, 16]].copy()
     df_ev.columns = ['Matricula', 'Nome_Ev', 'Mes', 'Ano', 'Cod_Evento', 'Nome_Evento', 'Valor_Provento']
     
     df_at = df_at_raw.iloc[2:, [1, 4, 44, 51, 62, 64]].copy()
     df_at.columns = ['Matricula', 'Nome', 'Data_Admissao', 'Categoria', 'Salario', 'Opta_Adiantamento']
+    
+    df_fe = df_fe_raw.iloc[2:, [4, 6, 14, 15]].copy()
+    df_fe.columns = ['Matricula', 'Nome_Fe', 'Data_Ini_Ferias', 'Data_Fim_Ferias']
 
+    # Tratamentos Básicos
     df_ev['Matricula'] = df_ev['Matricula'].apply(limpar_matricula)
     df_at['Matricula'] = df_at['Matricula'].apply(limpar_matricula)
+    df_fe['Matricula'] = df_fe['Matricula'].apply(limpar_matricula)
+    
     df_ev = df_ev[df_ev['Matricula'] != ""]
     df_at = df_at[df_at['Matricula'] != ""]
+    df_fe = df_fe[df_fe['Matricula'] != ""]
 
     df_ev['Valor_Provento'] = df_ev['Valor_Provento'].apply(limpar_moeda)
     df_at['Salario'] = df_at['Salario'].apply(limpar_moeda)
@@ -207,6 +232,8 @@ def processar_dados(file_eventos, file_ativos):
     df_ev['Ano'] = pd.to_numeric(df_ev['Ano'], errors='coerce').fillna(0).astype(int)
     df_ev['Cod_Evento'] = pd.to_numeric(df_ev['Cod_Evento'], errors='coerce').fillna(0).astype(int)
     df_at['Data_Admissao'] = pd.to_datetime(df_at['Data_Admissao'], errors='coerce', dayfirst=True)
+    df_fe['Data_Ini_Ferias'] = pd.to_datetime(df_fe['Data_Ini_Ferias'], errors='coerce', dayfirst=True)
+    df_fe['Data_Fim_Ferias'] = pd.to_datetime(df_fe['Data_Fim_Ferias'], errors='coerce', dayfirst=True)
 
     df_ev = df_ev[df_ev['Mes'] > 0]
 
@@ -224,7 +251,6 @@ def processar_dados(file_eventos, file_ativos):
 
     try: ano_ant = int(df_ev[df_ev['Mes'] == mes_anterior]['Ano'].mode()[0])
     except: ano_ant = 2026
-
     try: ano_atu = int(df_ev[df_ev['Mes'] == mes_atual]['Ano'].mode()[0])
     except: ano_atu = 2026
 
@@ -251,11 +277,27 @@ def processar_dados(file_eventos, file_ativos):
         data_adm = row['Data_Admissao']
         
         is_aprendiz = "Aprendiz (Lei 10.097/2000)" in categoria
-        esperado_adiantamento = round(salario * 0.40, 2)
         optante = verificar_optante(row['Opta_Adiantamento'])
-        
         direito_ant = tem_direito_adiantamento(mes_anterior, ano_ant, data_adm)
         direito_atu = tem_direito_adiantamento(mes_atual, ano_atu, data_adm)
+
+        # CÁLCULO PROPORCIONAL DE FÉRIAS
+        ferias_func = df_fe[(df_fe['Matricula'] == matricula)]
+        dias_fe_ant = 0
+        dias_fe_atu = 0
+        
+        for _, v_row in ferias_func.iterrows():
+            dias_fe_ant += calcular_dias_ferias_no_mes(mes_anterior, ano_ant, v_row['Data_Ini_Ferias'], v_row['Data_Fim_Ferias'])
+            dias_fe_atu += calcular_dias_ferias_no_mes(mes_atual, ano_atu, v_row['Data_Ini_Ferias'], v_row['Data_Fim_Ferias'])
+            
+        if dias_fe_ant > 30: dias_fe_ant = 30
+        if dias_fe_atu > 30: dias_fe_atu = 30
+        
+        dias_trab_ant = 30 - dias_fe_ant
+        dias_trab_atu = 30 - dias_fe_atu
+
+        esperado_ant = round((salario * 0.40) / 30 * dias_trab_ant, 2)
+        esperado_atu = round((salario * 0.40) / 30 * dias_trab_atu, 2)
 
         if not optante:
             status_final = "Sem adiantamento (opcional)"
@@ -265,16 +307,27 @@ def processar_dados(file_eventos, file_ativos):
             status_final = "Errado" if erros else "Certo"
             descricao_erro = " - ".join(erros) if erros else "Correto (Aprendiz zerado)"
         else:
-            if matricula in matriculas_evento_invalido: erros.append("Contém evento diferente de 100")
+            if matricula in matriculas_evento_invalido: 
+                erros.append("Contém evento diferente de 100")
                 
             if not direito_atu:
                 if val_atu > 0: erros.append("Recebeu indevidamente (Admitido após o dia 6)")
             else:
-                if val_atu == 0: erros.append("Falta adiantamento no mês atual")
-                elif abs(round(val_atu, 2) - esperado_adiantamento) > 0.02: erros.append(f"Cálculo incorreto (Esperado: R$ {esperado_adiantamento:.2f})")
+                if val_atu == 0 and dias_trab_atu > 0: 
+                    erros.append("Falta adiantamento no mês atual")
+                elif dias_trab_atu == 0 and val_atu > 0:
+                    erros.append("Recebeu indevidamente (Mês integral de férias)")
+                elif val_atu > 0 and abs(round(val_atu, 2) - esperado_atu) > 0.02:
+                    if dias_trab_atu < 30:
+                        erros.append(f"Cálculo de Férias incorreto (Esperado: R$ {esperado_atu:.2f} p/ {dias_trab_atu} dias trab.)")
+                    else:
+                        erros.append(f"Cálculo incorreto (Esperado: R$ {esperado_atu:.2f})")
 
+            # Divergência - Só avaliamos divergência cega se a expectativa para os dois meses era a mesma.
             if direito_ant and direito_atu:
-                if round(val_ant, 2) != round(val_atu, 2): erros.append("Divergência de valor entre os meses")
+                if esperado_ant == esperado_atu:
+                    if round(val_ant, 2) != round(val_atu, 2): 
+                        erros.append("Divergência de valor entre os meses")
 
             if len(erros) > 0:
                 status_final = "Errado"
@@ -287,11 +340,13 @@ def processar_dados(file_eventos, file_ativos):
                 elif not direito_ant and direito_atu:
                     status_final = "Funcionário Novo"
                     descricao_erro = "Primeiro adiantamento (Isento de comp. c/ mês anterior)"
+                elif dias_trab_atu < 30:
+                    status_final = "Certo (Férias)"
+                    descricao_erro = f"Proporcional correto ({dias_trab_atu} dias trab. / {dias_fe_atu} dias férias)"
                 else:
                     status_final = "Certo"
                     descricao_erro = "Sem divergências"
         
-        # Formata a data de admissão para exibir de forma limpa na tabela
         data_adm_formatada = data_adm.strftime('%d/%m/%Y') if pd.notna(data_adm) else ""
 
         resultados.append({
@@ -313,12 +368,13 @@ def processar_dados(file_eventos, file_ativos):
 # INTERFACE DO USUÁRIO
 # -----------------------------------------------------------------------------
 st.sidebar.header("📁 Importação de Dados")
-file_eventos = st.sidebar.file_uploader("Upload: LISTA DE EVENTOS", type=["xlsx", "csv"])
-file_ativos = st.sidebar.file_uploader("Upload: LISTA DE FUNCIONÁRIOS ATIVOS", type=["xlsx", "csv"])
+file_eventos = st.sidebar.file_uploader("1. Upload: LISTA DE EVENTOS", type=["xlsx", "csv"])
+file_ativos = st.sidebar.file_uploader("2. Upload: LISTA DE ATIVOS", type=["xlsx", "csv"])
+file_ferias = st.sidebar.file_uploader("3. Upload: LISTA DE FÉRIAS", type=["xlsx", "csv"])
 
-if file_eventos and file_ativos:
-    with st.spinner("Processando dados e aplicando regras de negócio..."):
-        df_final, mes_ant, mes_atu, tot_ant_global, tot_atu_global = processar_dados(file_eventos, file_ativos)
+if file_eventos and file_ativos and file_ferias:
+    with st.spinner("Processando dados, férias e aplicando regras de negócio..."):
+        df_final, mes_ant, mes_atu, tot_ant_global, tot_atu_global = processar_dados(file_eventos, file_ativos, file_ferias)
     
     st.success(f"Dados processados com sucesso! Comparando Mês {mes_ant} x Mês {mes_atu}.")
     
@@ -329,7 +385,7 @@ if file_eventos and file_ativos:
     with col_f1: f_nome = st.text_input("Buscar por Nome")
     with col_f2: f_mat = st.text_input("Buscar por Matrícula")
     with col_f3:
-        filtros_status = ["Todos", "Certo", "Errado", "Funcionário Novo", "Sem adiantamento (opcional)", "Não tem direito (admitido após dia 6)"]
+        filtros_status = ["Todos", "Certo", "Certo (Férias)", "Errado", "Funcionário Novo", "Sem adiantamento (opcional)", "Não tem direito (admitido após dia 6)"]
         f_status = st.selectbox("Filtrar por Status", filtros_status)
 
     df_filtrado = df_final.copy()
@@ -342,7 +398,11 @@ if file_eventos and file_ativos:
     st.subheader("📊 Resumo Geral")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Ativos", len(df_final))
-    m2.metric("Corretos", len(df_final[df_final['Status'] == 'Certo']))
+    
+    # Soma "Certo" + "Certo (Férias)" para mostrar os corretos totais
+    corretos = len(df_final[df_final['Status'].str.contains('Certo')])
+    m2.metric("Corretos", corretos)
+    
     m3.metric("Com Divergência", len(df_final[df_final['Status'] == 'Errado']))
     isentos = ['Funcionário Novo', 'Sem adiantamento (opcional)', 'Não tem direito (admitido após dia 6)']
     m4.metric("Isentos (Novos/Opcional)", len(df_final[df_final['Status'].isin(isentos)]))
@@ -364,7 +424,7 @@ if file_eventos and file_ativos:
     st.write("")
     
     def colorir_status(val):
-        if val == 'Certo': return 'background-color: #d4edda; color: #155724'
+        if 'Certo' in val: return 'background-color: #d4edda; color: #155724'
         elif val == 'Errado': return 'background-color: #f8d7da; color: #721c24'
         elif val == 'Funcionário Novo': return 'background-color: #cce5ff; color: #004085'
         elif val == 'Não tem direito (admitido após dia 6)': return 'background-color: #fff3cd; color: #856404'
@@ -458,4 +518,4 @@ if file_eventos and file_ativos:
     st.altair_chart((bars_diff + text_diff).properties(height=300, width=400), use_container_width=False)
 
 else:
-    st.info("👈 Por favor, anexe as duas planilhas (Eventos e Ativos) no menu lateral para iniciar a conferência.")
+    st.info("👈 Por favor, anexe as TRÊS planilhas no menu lateral para iniciar a conferência.")
