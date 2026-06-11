@@ -60,7 +60,7 @@ st.markdown("---")
 with st.expander("📖 Como extrair as planilhas do KMM (Passo a Passo)"):
     st.markdown("""
     ### 1. LISTA DE EVENTOS DE RECIBO DE PAGAMENTO
-    **Caminho:** `Folha de Pagamento` ➔ `Folha de Pagamento` ➔ `Lista de Recibos de Pagamento...`
+    **Caminho:** `Folha de Pagamento` ➔ `Folha de Pagamento` ➔ `Lista de Eventos de Recibos de Pagamento...`
     * **Competência Inicial:** Último adiantamento processado (mês anterior)
     * **Competência Final:** Adiantamento atual que está validando (mês atual)
     * **Tipo de Recibo:** `2 Adiantamento`
