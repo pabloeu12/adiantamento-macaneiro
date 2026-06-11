@@ -135,7 +135,6 @@ def calcular_dias_ferias_no_mes(mes, ano, data_ini, data_fim):
     d_end = overlap_end.day
     if d_end == 31: d_end = 30
     
-    # Se tirou férias o mês inteiro
     if overlap_start == primeiro_dia and overlap_end == ultimo_dia_real:
         return 30
         
@@ -197,7 +196,6 @@ def gerar_excel_formatado(df, mes_ant, mes_atu):
 
 @st.cache_data
 def processar_dados(file_eventos, file_ativos, file_ferias):
-    # Leituras
     if file_eventos.name.endswith('.csv'): df_ev_raw = pd.read_csv(file_eventos, header=None, sep=None, engine='python')
     else: df_ev_raw = pd.read_excel(file_eventos, header=None)
         
@@ -207,7 +205,6 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
     if file_ferias.name.endswith('.csv'): df_fe_raw = pd.read_csv(file_ferias, header=None, sep=None, engine='python')
     else: df_fe_raw = pd.read_excel(file_ferias, header=None)
 
-    # Recortes Exatos (Linha 3 em diante)
     df_ev = df_ev_raw.iloc[2:, [1, 2, 11, 12, 13, 14, 16]].copy()
     df_ev.columns = ['Matricula', 'Nome_Ev', 'Mes', 'Ano', 'Cod_Evento', 'Nome_Evento', 'Valor_Provento']
     
@@ -217,7 +214,6 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
     df_fe = df_fe_raw.iloc[2:, [4, 6, 14, 15]].copy()
     df_fe.columns = ['Matricula', 'Nome_Fe', 'Data_Ini_Ferias', 'Data_Fim_Ferias']
 
-    # Tratamentos Básicos
     df_ev['Matricula'] = df_ev['Matricula'].apply(limpar_matricula)
     df_at['Matricula'] = df_at['Matricula'].apply(limpar_matricula)
     df_fe['Matricula'] = df_fe['Matricula'].apply(limpar_matricula)
@@ -281,7 +277,7 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
         direito_ant = tem_direito_adiantamento(mes_anterior, ano_ant, data_adm)
         direito_atu = tem_direito_adiantamento(mes_atual, ano_atu, data_adm)
 
-        # CÁLCULO PROPORCIONAL DE FÉRIAS
+        # CÁLCULO DE DIAS TRABALHADOS (DESCONTANDO FÉRIAS)
         ferias_func = df_fe[(df_fe['Matricula'] == matricula)]
         dias_fe_ant = 0
         dias_fe_atu = 0
@@ -296,8 +292,16 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
         dias_trab_ant = 30 - dias_fe_ant
         dias_trab_atu = 30 - dias_fe_atu
 
-        esperado_ant = round((salario * 0.40) / 30 * dias_trab_ant, 2)
-        esperado_atu = round((salario * 0.40) / 30 * dias_trab_atu, 2)
+        # EXPECTATIVA DE VALOR (Regra: Menos de 15 dias trabalhados = Zero Adiantamento)
+        if dias_trab_ant < 15:
+            esperado_ant = 0.0
+        else:
+            esperado_ant = round((salario * 0.40) / 30 * dias_trab_ant, 2)
+            
+        if dias_trab_atu < 15:
+            esperado_atu = 0.0
+        else:
+            esperado_atu = round((salario * 0.40) / 30 * dias_trab_atu, 2)
 
         if not optante:
             status_final = "Sem adiantamento (opcional)"
@@ -313,22 +317,27 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
             if not direito_atu:
                 if val_atu > 0: erros.append("Recebeu indevidamente (Admitido após o dia 6)")
             else:
-                if val_atu == 0 and dias_trab_atu > 0: 
-                    erros.append("Falta adiantamento no mês atual")
-                elif dias_trab_atu == 0 and val_atu > 0:
-                    erros.append("Recebeu indevidamente (Mês integral de férias)")
-                elif val_atu > 0 and abs(round(val_atu, 2) - esperado_atu) > 0.02:
-                    if dias_trab_atu < 30:
-                        erros.append(f"Cálculo de Férias incorreto (Esperado: R$ {esperado_atu:.2f} p/ {dias_trab_atu} dias trab.)")
-                    else:
-                        erros.append(f"Cálculo incorreto (Esperado: R$ {esperado_atu:.2f})")
+                # Se trabalhou 15 dias ou mais
+                if dias_trab_atu >= 15:
+                    if val_atu == 0: 
+                        erros.append("Falta adiantamento no mês atual")
+                    elif val_atu > 0 and abs(round(val_atu, 2) - esperado_atu) > 0.02:
+                        if dias_trab_atu < 30:
+                            erros.append(f"Cálculo de Férias incorreto (Esperado: R$ {esperado_atu:.2f} p/ {dias_trab_atu} dias trab.)")
+                        else:
+                            erros.append(f"Cálculo incorreto (Esperado: R$ {esperado_atu:.2f})")
+                # Se trabalhou menos de 15 dias
+                else:
+                    if val_atu > 0:
+                        erros.append(f"Recebeu indevidamente (Trabalhou apenas {dias_trab_atu} dias no mês)")
 
-            # Divergência - Só avaliamos divergência cega se a expectativa para os dois meses era a mesma.
+            # Divergência - Só avaliamos divergência cega se a expectativa para os dois meses era a mesma (ex: sem férias em nenhum, salário igual).
             if direito_ant and direito_atu:
                 if esperado_ant == esperado_atu:
                     if round(val_ant, 2) != round(val_atu, 2): 
                         erros.append("Divergência de valor entre os meses")
 
+            # Atribuição Final de Status
             if len(erros) > 0:
                 status_final = "Errado"
                 descricao_erro = " - ".join(erros)
@@ -340,6 +349,9 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
                 elif not direito_ant and direito_atu:
                     status_final = "Funcionário Novo"
                     descricao_erro = "Primeiro adiantamento (Isento de comp. c/ mês anterior)"
+                elif dias_trab_atu < 15:
+                    status_final = "Certo (Férias)"
+                    descricao_erro = f"Isento de adiantamento ({dias_trab_atu} dias trab. no mês)"
                 elif dias_trab_atu < 30:
                     status_final = "Certo (Férias)"
                     descricao_erro = f"Proporcional correto ({dias_trab_atu} dias trab. / {dias_fe_atu} dias férias)"
@@ -399,7 +411,6 @@ if file_eventos and file_ativos and file_ferias:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Ativos", len(df_final))
     
-    # Soma "Certo" + "Certo (Férias)" para mostrar os corretos totais
     corretos = len(df_final[df_final['Status'].str.contains('Certo')])
     m2.metric("Corretos", corretos)
     
