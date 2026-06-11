@@ -144,23 +144,27 @@ def gerar_excel_formatado(df, mes_ant, mes_atu):
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             
         for row in range(2, worksheet.max_row + 1):
-            for col_idx in [4, 5, 6, 7]:
+            # Formata colunas de valor monetário (Agora deslocadas para 5, 6, 7, 8 devido à Admissão ser a coluna 3)
+            for col_idx in [5, 6, 7, 8]:
                 cell = worksheet.cell(row=row, column=col_idx)
                 cell.number_format = 'R$ #,##0.00'
                 cell.alignment = Alignment(horizontal='right')
             
-            worksheet.cell(row=row, column=1).alignment = Alignment(horizontal='center')
-            worksheet.cell(row=row, column=8).alignment = Alignment(horizontal='center')
+            # Alinhamentos centrais das colunas de texto/código/datas
+            worksheet.cell(row=row, column=1).alignment = Alignment(horizontal='center') # Matrícula
+            worksheet.cell(row=row, column=3).alignment = Alignment(horizontal='center') # Data de Admissão
+            worksheet.cell(row=row, column=9).alignment = Alignment(horizontal='center') # Status
             
-            status_val = worksheet.cell(row=row, column=8).value
+            # Colorir células de Status dinamicamente (Status agora é coluna 9)
+            status_val = worksheet.cell(row=row, column=9).value
             if status_val == 'Certo':
-                worksheet.cell(row=row, column=8).fill = PatternFill(start_color='D4EDDA', end_color='D4EDDA', fill_type='solid')
+                worksheet.cell(row=row, column=9).fill = PatternFill(start_color='D4EDDA', end_color='D4EDDA', fill_type='solid')
             elif status_val == 'Errado':
-                worksheet.cell(row=row, column=8).fill = PatternFill(start_color='F8D7DA', end_color='F8D7DA', fill_type='solid')
+                worksheet.cell(row=row, column=9).fill = PatternFill(start_color='F8D7DA', end_color='F8D7DA', fill_type='solid')
             elif status_val == 'Funcionário Novo':
-                worksheet.cell(row=row, column=8).fill = PatternFill(start_color='CCE5FF', end_color='CCE5FF', fill_type='solid')
+                worksheet.cell(row=row, column=9).fill = PatternFill(start_color='CCE5FF', end_color='CCE5FF', fill_type='solid')
             else:
-                worksheet.cell(row=row, column=8).fill = PatternFill(start_color='E2E3E5', end_color='E2E3E5', fill_type='solid')
+                worksheet.cell(row=row, column=9).fill = PatternFill(start_color='E2E3E5', end_color='E2E3E5', fill_type='solid')
 
         for col in worksheet.columns:
             max_len = 0
@@ -287,9 +291,13 @@ def processar_dados(file_eventos, file_ativos):
                     status_final = "Certo"
                     descricao_erro = "Sem divergências"
         
+        # Formata a data de admissão para exibir de forma limpa na tabela
+        data_adm_formatada = data_adm.strftime('%d/%m/%Y') if pd.notna(data_adm) else ""
+
         resultados.append({
             "Matricula": matricula,
             "Nome": row['Nome'],
+            "Data de Admissão": data_adm_formatada,
             "Categoria": categoria,
             "Salario": salario,
             f"Adiantamento (Mês {mes_anterior})": val_ant,
@@ -374,7 +382,7 @@ if file_eventos and file_ativos:
         height=350
     )
 
-    # --- ANÁLISES GRÁFICAS CORRIGIDAS ---
+    # --- ANÁLISES GRÁFICAS ---
     st.markdown("---")
     st.subheader("📈 Análises Gráficas da Empresa")
     
