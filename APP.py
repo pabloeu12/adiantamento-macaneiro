@@ -60,7 +60,7 @@ col1, col2, col3 = st.columns([1, 2.5, 1])
 
 with col1:
     if logo_bwise:
-        st.image(logo_bwise, use_column_width=True)
+        st.image(logo_bwise, width=200)
     else:
         st.warning("Logo Bwise não encontrada.")
 
@@ -69,7 +69,7 @@ with col2:
 
 with col3:
     if logo_macaneiro:
-        st.image(logo_macaneiro, use_column_width=True)
+        st.image(logo_macaneiro, width=200)
     else:
         st.warning("Logo Maçaneiro não encontrada.")
 
