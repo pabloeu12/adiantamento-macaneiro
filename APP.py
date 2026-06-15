@@ -353,7 +353,7 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
                         erros.append(f"Recebeu indevidamente (Trabalhou apenas {dias_trab_atu} dias no mês)")
 
             # Divergência - Só avaliamos divergência cega se a expectativa para os dois meses era a mesma (ex: sem férias em nenhum, salário igual).
-            if direito_ant and derecho_atu:
+            if direito_ant and direito_atu:
                 if esperado_ant == esperado_atu:
                     if round(val_ant, 2) != round(val_atu, 2): 
                         erros.append("Divergência de valor entre os meses")
