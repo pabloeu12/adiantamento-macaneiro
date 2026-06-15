@@ -1,16 +1,41 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from PIL import Image
 import io
+import os
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 # -----------------------------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA E CORES
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Conferência Adiantamento Salarial", layout="wide")
+st.set_page_config(
+    page_title="Conferência Adiantamento Salarial", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# ════════════════════════════════════════════════════════════
+# BUSCA INTELIGENTE DE LOGOS (Resolve os erros de JPG/PNG/Espaços)
+# ════════════════════════════════════════════════════════════
+def buscar_logo(palavra_chave):
+    """
+    Varre a pasta atual e procura qualquer arquivo de imagem que 
+    contenha a palavra-chave (ex: 'bwise' ou 'macaneiro').
+    """
+    try:
+        arquivos = os.listdir('.')
+        for arq in arquivos:
+            if arq.lower().endswith(('.png', '.jpg', '.jpeg')) and palavra_chave in arq.lower():
+                return arq
+    except Exception:
+        pass
+    return None
+
+logo_bwise = buscar_logo("bwise")
+logo_macaneiro = buscar_logo("macaneiro")
+
+# Estilos CSS Customizados para o Título Centralizado
 st.markdown(
     """
     <style>
@@ -18,8 +43,10 @@ st.markdown(
         text-align: center;
         color: #1E3A8A;
         font-family: 'Arial', sans-serif;
+        font-size: 1.8rem; /* Reduzido em 40% para melhor equilíbrio visual */
         font-weight: bold;
-        padding-top: 15px;
+        line-height: 1.2;
+        margin-top: 15px;
     }
     </style>
     """,
@@ -27,30 +54,24 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------------------
-# CABEÇALHO COM LOGOS
+# CABEÇALHO COM LOGOS (Ajustado)
 # -----------------------------------------------------------------------------
-col1, col2, col3 = st.columns([1, 3, 1])
+col1, col2, col3 = st.columns([1, 2.5, 1])
 
 with col1:
-    try:
-        img_bwise = Image.open("logo bwise.png")
-        st.image(img_bwise, width=180)
-    except FileNotFoundError:
+    if logo_bwise:
+        st.image(logo_bwise, use_column_width=True)
+    else:
         st.warning("Logo Bwise não encontrada.")
 
 with col2:
-    st.markdown('<h1 class="titulo-sistema">CONFERÊNCIA ADIANTAMENTO SALARIAL</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="titulo-sistema">CONFERÊNCIA<br>ADIANTAMENTO SALARIAL</h1>', unsafe_allow_html=True)
 
 with col3:
-    try:
-        img_macaneiro = Image.open("logo maçaneiro.png")
-        st.image(img_macaneiro, width=180)
-    except FileNotFoundError:
-        try:
-            img_macaneiro = Image.open("logo maçaneiro.jpg")
-            st.image(img_macaneiro, width=180)
-        except FileNotFoundError:
-            st.warning("Logo Maçaneiro não encontrada (Verifique se o nome é 'logo maçaneiro.png' ou .jpg).")
+    if logo_macaneiro:
+        st.image(logo_macaneiro, use_column_width=True)
+    else:
+        st.warning("Logo Maçaneiro não encontrada.")
 
 st.markdown("---")
 
@@ -332,7 +353,7 @@ def processar_dados(file_eventos, file_ativos, file_ferias):
                         erros.append(f"Recebeu indevidamente (Trabalhou apenas {dias_trab_atu} dias no mês)")
 
             # Divergência - Só avaliamos divergência cega se a expectativa para os dois meses era a mesma (ex: sem férias em nenhum, salário igual).
-            if direito_ant and direito_atu:
+            if direito_ant and derecho_atu:
                 if esperado_ant == esperado_atu:
                     if round(val_ant, 2) != round(val_atu, 2): 
                         erros.append("Divergência de valor entre os meses")
@@ -443,12 +464,12 @@ if file_eventos and file_ativos and file_ferias:
         
     st.dataframe(
         df_filtrado.style.map(colorir_status, subset=['Status'])\
-                   .format({
-                       "Salario": "R$ {:.2f}", 
-                       f"Adiantamento (Mês {mes_ant})": "R$ {:.2f}", 
-                       f"Adiantamento (Mês {mes_atu})": "R$ {:.2f}",
-                       "Diferença Entre Meses": "R$ {:.2f}"
-                   }),
+                    .format({
+                        "Salario": "R$ {:.2f}", 
+                        f"Adiantamento (Mês {mes_ant})": "R$ {:.2f}", 
+                        f"Adiantamento (Mês {mes_atu})": "R$ {:.2f}",
+                        "Diferença Entre Meses": "R$ {:.2f}"
+                    }),
         use_container_width=True,
         height=350
     )
